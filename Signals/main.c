@@ -2,16 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-
-char buffer[4] = "0";
-
-void pipeline(const char* tag, int* in_fd, int* out_fd) {
-    printf("%s: ", tag);
-    read(in_fd[0], buffer, sizeof(buffer) / sizeof(*buffer));
-    snprintf(buffer, sizeof(buffer) / sizeof(*buffer), "%d", (int)strtol(buffer, NULL, 10) + 1);
-    printf("%s\n", buffer);
-    write(out_fd[1], buffer, sizeof(buffer) / sizeof(*buffer));
-};
+#include <spandsp.h>
 
 void handler(int signal) {
     switch (signal) {
@@ -28,48 +19,46 @@ void handler(int signal) {
 };
 
 int main() {
-    int descriptors[3][2];
-    for (int i = 0; i < 3; ++i)
-        pipe(descriptors[i]);
-    write(descriptors[0][1], buffer, sizeof(buffer) / sizeof(*buffer));
-    pid_t pid = fork();
+    int pid = fork();
+    signal(pid? SIGUSR1 : SIGUSR2, handler);
 
-    signal(pid ? SIGUSR1 : SIGUSR2, handler);
+    int pid_ = 0;
+    if (!pid) {
+        pid_ = fork();
+        signal(pid_ ? SIGUSR2 : SIGUSR1, handler);
+    } else
+        usleep(100);
+
+    int i;
+    if (pid) {
+        i = 1;
+        while(true) {
+            printf("First: %d\n", i);
+            i += 3;
+            kill(pid, SIGUSR2);
+            pause();
+            if (i >= 100)
+                break;
+        }
+    } else {
+        pause();
+        i = pid_? 2 : 3;
+        while(true) {
+            printf(pid_ ? "Second: %d\n" : "Third: %d\n", i);
+            i += 3;
+            kill((pid_ ? pid_ : getppid()), (pid_ ? SIGUSR1 : SIGUSR2));
+            pause();
+            if (pid_) {
+                kill(getppid(), SIGUSR1);
+                pause();
+            }
+            if (i >= 100)
+                break;
+        }
+    }
 
     if (pid)
-        do {
-            pipeline("Parent", descriptors[0], descriptors[1]);
-            if (atoi(buffer) < 100) {
-                usleep(300);
-                kill(pid, SIGUSR2);
-                pause();
-            };
-        } while (atoi(buffer) < 98);
-    else
-        do {
-            pause();
-            pid_t c_pid = fork();
-
-            if (c_pid) {
-                pipeline("Child::Parent", descriptors[1], descriptors[2]);
-                usleep(500);
-                kill(c_pid, SIGUSR2);
-                pause();
-                kill(getppid(), SIGUSR1);
-            }
-            else {
-                signal(SIGUSR2, handler);
-                pause();
-                pipeline("Child::Child", descriptors[2], descriptors[0]);
-                usleep(500);
-                kill(getppid(), SIGUSR2);
-                raise(SIGKILL);
-            };
-        } while (atoi(buffer) < 97);
-
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 2; ++j)
-            close(descriptors[i][j]);
+        printf("Result: %d\n", i);
 
     return 0;
 }
