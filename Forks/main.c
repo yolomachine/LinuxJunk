@@ -1,43 +1,40 @@
 #include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <signal.h>
-
-char buffer[4] = "0";
-
-void pipeline(const char* tag, int* in_fd, int* out_fd) {
-    printf("%s: ", tag);
-    read(in_fd[0], buffer, sizeof(buffer) / sizeof(*buffer));
-    snprintf(buffer, sizeof(buffer) / sizeof(*buffer), "%d", (int)strtol(buffer, NULL, 10) + 1);
-    printf("%s\n", buffer);
-    write(out_fd[1], buffer, sizeof(buffer) / sizeof(*buffer));
-};
+#include <zconf.h>
 
 int main() {
+    int parent_pipe[2];
+    int child_pipe[2];
+    int THIRD_MEGA_PIPE[2];
 
-    int descriptors[3][2];
-    for (int i = 0; i < 3; ++i)
-        pipe(descriptors[i]);
-    write(descriptors[0][1], buffer, sizeof(buffer) / sizeof(*buffer));
-    pid_t pid = fork();
+    pipe(parent_pipe);
+    pipe(child_pipe);
+    pipe(THIRD_MEGA_PIPE);
 
-    while (100 - sizeof(descriptors)/sizeof(*descriptors) >= strtol(buffer, NULL, 10)) {
-        if (pid)
-            pipeline("Parent", descriptors[0], descriptors[1]);
-        else {
-            pid_t c_pid = fork();
-            if (c_pid)
-                pipeline("Child::Parent", descriptors[1], descriptors[2]);
-            else {
-                pipeline("Child::Child", descriptors[2], descriptors[0]);
-                raise(SIGKILL);
-            };
-        };
-    };
+    int pid = fork();
+    int i = 0;
 
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 2; ++j)
-            close(descriptors[i][j]);
+    if (pid) {
+        close(parent_pipe[0]);
+        while (i < 99) {
+            printf("First: %d\n", ++i);
+            write(parent_pipe[1], &i, sizeof i);
+            read(THIRD_MEGA_PIPE[0], &i, sizeof i);
+        }
+        ++i;
+        close(parent_pipe[1]);
+    } else {
+        int ppid = fork();
+        close(ppid? THIRD_MEGA_PIPE[0] : child_pipe[0]);
+        do {
+            read((ppid? child_pipe[0] : parent_pipe[0]), &i, sizeof i);
+            printf((ppid? "Third: %d\n" : "Second: %d\n"), ++i);
+            write((ppid? THIRD_MEGA_PIPE[1] : child_pipe[1]), &i, sizeof i);
+        } while (i < (ppid? 99 : 97));
+        close((ppid? THIRD_MEGA_PIPE[1] : child_pipe[1]));
+    }
+
+    if (pid)
+        printf("Result: %d\n", i);
 
     return 0;
 }
