@@ -14,6 +14,7 @@ void pipeline(const char* tag, int* in_fd, int* out_fd) {
 };
 
 int main() {
+
     int descriptors[3][2];
     for (int i = 0; i < 3; ++i)
         pipe(descriptors[i]);
